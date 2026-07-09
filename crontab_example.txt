@@ -1,0 +1,14 @@
+# ── Cron job pour Linux / WSL ──────────────────────────────────────
+# 
+# Pour installer ce cron, exécuter :
+#   crontab -e
+# puis ajouter la ligne ci-dessous (adapter le chemin) :
+#
+# Exécuter tous les jours à 2h du matin
+0 2 * * * cd /path/to/internship && /usr/bin/python3 scripts/run_pipeline.py >> logs/pipeline.log 2>&1
+#
+# Pour Windows (Task Scheduler), créer une tâche planifiée :
+#   Programme: python
+#   Arguments: scripts\run_pipeline.py
+#   Démarrer dans: C:\Users\rarou\Desktop\internship
+#   Planification: Quotidien à 02:00

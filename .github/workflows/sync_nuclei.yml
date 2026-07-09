@@ -1,0 +1,53 @@
+name: Sync Nuclei Templates KB
+
+on:
+  schedule:
+    # Tous les jours à 2h UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    # Lancement manuel possible depuis l'onglet Actions
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout du projet
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Restaurer les données précédentes
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/nuclei-templates
+            data/nuclei_kb.db
+            data/last_commit.txt
+          key: nuclei-kb-data-${{ github.run_number }}
+          restore-keys: |
+            nuclei-kb-data-
+
+      - name: Exécuter le pipeline
+        run: python scripts/run_pipeline.py
+
+      - name: Générer le rapport
+        run: python scripts/generate_report.py --output data/report.md
+
+      - name: Upload des artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-kb-${{ github.run_number }}
+          path: |
+            data/nuclei_kb.db
+            data/last_commit.txt
+            data/report.md
+            logs/
+          retention-days: 30
