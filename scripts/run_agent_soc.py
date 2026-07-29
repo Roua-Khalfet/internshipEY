@@ -10,6 +10,14 @@ from pathlib import Path
 # Ajouter le répertoire parent au path pour les imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Load environment variables from .env (if present)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    # Continue gracefully if python-dotenv is not installed; env vars can be set externally
+    pass
+
 try:
     import google.generativeai as genai
 except ImportError:
