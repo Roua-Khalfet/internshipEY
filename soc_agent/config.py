@@ -3,51 +3,58 @@ Centralized configuration for the SOC Copilot agent.
 All paths are relative to the project root (BASE_DIR).
 """
 
+import json
 import os
 from pathlib import Path
 
 # ── Project Root ───────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ── ML Model ───────────────────────────────────────────────────────
-MODEL_PATH = BASE_DIR / "xgboost_nsl_kdd.pkl"
-PREPROCESSORS_DIR = BASE_DIR / "data" / "preprocessors"
-SCALER_PATH = PREPROCESSORS_DIR / "standard_scaler.pkl"
-LABEL_ENCODERS_PATH = PREPROCESSORS_DIR / "label_encoders.pkl"
+# ── ML Model (scikit-learn Pipeline with XGBoost) ──────────────────
+MODEL_PATH = BASE_DIR / "nsl_kdd_xgboost_pipeline.pkl"
+METADATA_PATH = BASE_DIR / "nsl_kdd_xgboost_metadata.json"
 
 # ── Nuclei Knowledge Base ──────────────────────────────────────────
 DB_PATH = BASE_DIR / "data" / "nuclei_kb.db"
 
+# Load environment variables from .env if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
+
 # ── LLM Configuration ─────────────────────────────────────────────
-LLM_MODEL_NAME = os.environ.get("SOC_LLM_MODEL", "gemini-2.0-flash")
+GROQ_API_KEY_ENV = "GROQ_API_KEY"
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
-# Alternative: "GOOGLE_API_KEY" is also supported by langchain-google-genai
+
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq" if os.environ.get("GROQ_API_KEY") else "gemini")
+LLM_MODEL_NAME = os.environ.get(
+    "SOC_LLM_MODEL",
+    "llama-3.3-70b-versatile" if LLM_PROVIDER == "groq" else "gemini-2.0-flash",
+)
 
 # ── NSL-KDD Feature Configuration ─────────────────────────────────
-# The 42 original NSL-KDD column names (in order)
-NSL_KDD_COLUMNS = [
-    "duration", "protocol_type", "service", "flag", "src_bytes",
-    "dst_bytes", "land", "wrong_fragment", "urgent", "hot",
-    "num_failed_logins", "logged_in", "num_compromised", "root_shell",
+# From nsl_kdd_xgboost_metadata.json — the pipeline expects these features.
+
+CATEGORICAL_FEATURES = ["protocol_type", "service", "flag"]
+
+NUMERIC_FEATURES = [
+    "duration", "src_bytes", "dst_bytes", "land", "wrong_fragment", "urgent",
+    "hot", "num_failed_logins", "logged_in", "num_compromised", "root_shell",
     "su_attempted", "num_root", "num_file_creations", "num_shells",
-    "num_access_files", "num_outbound_cmds", "is_host_login",
-    "is_guest_login", "count", "srv_count", "serror_rate",
-    "srv_serror_rate", "rerror_rate", "srv_rerror_rate",
-    "same_srv_rate", "diff_srv_rate", "srv_diff_host_rate",
+    "num_access_files", "num_outbound_cmds", "is_host_login", "is_guest_login",
+    "count", "srv_count", "serror_rate", "srv_serror_rate", "rerror_rate",
+    "srv_rerror_rate", "same_srv_rate", "diff_srv_rate", "srv_diff_host_rate",
     "dst_host_count", "dst_host_srv_count", "dst_host_same_srv_rate",
     "dst_host_diff_srv_rate", "dst_host_same_src_port_rate",
     "dst_host_srv_diff_host_rate", "dst_host_serror_rate",
     "dst_host_srv_serror_rate", "dst_host_rerror_rate",
-    "dst_host_srv_rerror_rate", "attack", "level",
+    "dst_host_srv_rerror_rate",
 ]
 
-# The 15 features selected via SelectKBest (mutual_info_classif, k=15)
-# These are the features the XGBoost model was trained on.
-SELECTED_FEATURES = [
-    "duration", "protocol_type", "service", "flag", "src_bytes",
-    "dst_bytes", "wrong_fragment", "hot", "logged_in", "num_compromised",
-    "count", "srv_count", "serror_rate", "srv_serror_rate", "rerror_rate",
-]
+# All 41 features in the order the pipeline expects
+PIPELINE_FEATURES = CATEGORICAL_FEATURES + NUMERIC_FEATURES
 
-# Categorical columns that were label-encoded in the notebook
-CATEGORICAL_COLUMNS = ["protocol_type", "service", "flag"]
+# Target mapping (from metadata)
+TARGET_MAPPING = {"normal": 0, "attack": 1}

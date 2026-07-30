@@ -16,7 +16,12 @@ import logging
 import os
 import sys
 
-from soc_agent.config import GEMINI_API_KEY_ENV, LLM_MODEL_NAME
+from soc_agent.config import (
+    GEMINI_API_KEY_ENV,
+    GROQ_API_KEY_ENV,
+    LLM_MODEL_NAME,
+    LLM_PROVIDER,
+)
 from soc_agent.prompts import SYSTEM_PROMPT
 from soc_agent.tools import get_nuclei_stats, predict_anomaly, search_nuclei_kb
 
@@ -26,6 +31,7 @@ logger = logging.getLogger(__name__)
 def create_soc_agent(
     model_name: str | None = None,
     api_key: str | None = None,
+    provider: str | None = None,
     verbose: bool = True,
 ):
     """
@@ -33,46 +39,71 @@ def create_soc_agent(
 
     Args:
         model_name: Override the LLM model name (default: from config/env).
-        api_key: Override the API key (default: from GEMINI_API_KEY env var).
+        api_key: Override the API key (default: from GROQ_API_KEY or GEMINI_API_KEY).
+        provider: Override provider ('groq' or 'gemini').
         verbose: If True, print agent reasoning steps to stdout.
 
     Returns:
         A compiled LangGraph agent (CompiledStateGraph) ready for invocation.
-
-    Raises:
-        ValueError: If no API key is found.
-        ImportError: If required packages are not installed.
     """
-    # ── Resolve API key ────────────────────────────────────────────
-    resolved_key = api_key or os.environ.get(GEMINI_API_KEY_ENV)
-    if not resolved_key:
-        raise ValueError(
-            f"No API key found. Set the {GEMINI_API_KEY_ENV} environment variable "
-            f"or pass api_key= to create_soc_agent().\n"
-            f"  PowerShell: $env:{GEMINI_API_KEY_ENV}=\"your_api_key_here\"\n"
-            f"  Get a free key at: https://aistudio.google.com/apikey"
+    # ── Resolve provider and API key ────────────────────────────────
+    resolved_provider = (
+        provider
+        or LLM_PROVIDER
+        or ("groq" if os.environ.get("GROQ_API_KEY") or (api_key and api_key.startswith("gsk_")) else "gemini")
+    ).lower()
+
+    if resolved_provider == "groq":
+        resolved_key = api_key or os.environ.get(GROQ_API_KEY_ENV) or os.environ.get("GROQ_API_KEY")
+        if not resolved_key:
+            raise ValueError(
+                f"No Groq API key found. Set the {GROQ_API_KEY_ENV} environment variable in .env "
+                f"or pass api_key= to create_soc_agent()."
+            )
+        resolved_model = model_name or os.environ.get("SOC_LLM_MODEL", "llama-3.3-70b-versatile")
+
+        try:
+            from langchain_groq import ChatGroq
+            from langgraph.prebuilt import create_react_agent
+        except ImportError as e:
+            raise ImportError(
+                f"Missing required package: {e.name}. "
+                "Install with: pip install langchain-groq langgraph"
+            ) from e
+
+        llm = ChatGroq(
+            model=resolved_model,
+            groq_api_key=resolved_key,
+            temperature=0.1,
+            max_tokens=4096,
+        )
+    else:
+        resolved_key = api_key or os.environ.get(GEMINI_API_KEY_ENV) or os.environ.get("GEMINI_API_KEY")
+        if not resolved_key:
+            raise ValueError(
+                f"No Gemini API key found. Set the {GEMINI_API_KEY_ENV} environment variable in .env "
+                f"or pass api_key= to create_soc_agent().\n"
+                f"  PowerShell: $env:{GEMINI_API_KEY_ENV}=\"your_api_key_here\"\n"
+            )
+        resolved_model = model_name or os.environ.get("SOC_LLM_MODEL", "gemini-2.0-flash")
+
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            from langgraph.prebuilt import create_react_agent
+        except ImportError as e:
+            raise ImportError(
+                f"Missing required package: {e.name}. "
+                "Install with: pip install langchain-google-genai langgraph"
+            ) from e
+
+        llm = ChatGoogleGenerativeAI(
+            model=resolved_model,
+            google_api_key=resolved_key,
+            temperature=0.1,
+            max_output_tokens=4096,
         )
 
-    resolved_model = model_name or LLM_MODEL_NAME
-
-    # ── Import LangChain components ────────────────────────────────
-    try:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        from langgraph.prebuilt import create_react_agent
-    except ImportError as e:
-        raise ImportError(
-            f"Missing required package: {e.name}. "
-            "Install with: pip install langchain-google-genai langgraph"
-        ) from e
-
-    # ── Initialize LLM ─────────────────────────────────────────────
-    llm = ChatGoogleGenerativeAI(
-        model=resolved_model,
-        google_api_key=resolved_key,
-        temperature=0.1,  # Low temperature for consistent, analytical responses
-        max_output_tokens=4096,
-    )
-    logger.info("Initialized LLM: %s", resolved_model)
+    logger.info("Initialized LLM (%s): %s", resolved_provider.upper(), resolved_model)
 
     # ── Define tools ───────────────────────────────────────────────
     tools = [predict_anomaly, search_nuclei_kb, get_nuclei_stats]
@@ -104,6 +135,11 @@ def run_analysis(
     alert: dict,
     verbose: bool = True,
 ) -> str:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     """
     Run the SOC Copilot agent on a network alert and return the incident report.
 

@@ -2,80 +2,94 @@
 LangChain Tool definitions for the SOC Copilot Agent.
 
 Tools:
-    1. predict_anomaly   — Run XGBoost ML model on network flow features
+    1. predict_anomaly   — Run XGBoost ML pipeline on network flow features
     2. search_nuclei_kb  — Search the Nuclei vulnerability knowledge base
     3. get_nuclei_stats  — Get global KB statistics for context
 """
 
 import json
 import logging
-import pickle
 import sqlite3
 from pathlib import Path
 
+import joblib
 import numpy as np
+import pandas as pd
 from langchain_core.tools import tool
 
-from soc_agent.config import DB_PATH, MODEL_PATH, SELECTED_FEATURES
-from soc_agent.preprocessing import NSLKDDPreprocessor
+from soc_agent.config import (
+    CATEGORICAL_FEATURES,
+    DB_PATH,
+    MODEL_PATH,
+    NUMERIC_FEATURES,
+    PIPELINE_FEATURES,
+    TARGET_MAPPING,
+)
 
 logger = logging.getLogger(__name__)
 
-# ── Lazy-loaded singletons ─────────────────────────────────────────
-_preprocessor: NSLKDDPreprocessor | None = None
-_model = None
+# ── Lazy-loaded singleton ──────────────────────────────────────────
+_pipeline = None
 
 
-def _get_preprocessor() -> NSLKDDPreprocessor:
-    """Lazy-load the preprocessor (encoders + scaler)."""
-    global _preprocessor
-    if _preprocessor is None:
-        _preprocessor = NSLKDDPreprocessor()
-    return _preprocessor
-
-
-def _get_model():
-    """Lazy-load the XGBoost model from the .pkl file."""
-    global _model
-    if _model is None:
+def _get_pipeline():
+    """Lazy-load the scikit-learn Pipeline (preprocessor + XGBoost) from .pkl."""
+    global _pipeline
+    if _pipeline is None:
         if not MODEL_PATH.exists():
             raise FileNotFoundError(
-                f"XGBoost model not found at {MODEL_PATH}. "
-                "Ensure 'xgboost_nsl_kdd.pkl' is in the project root."
+                f"XGBoost pipeline not found at {MODEL_PATH}. "
+                "Ensure 'nsl_kdd_xgboost_pipeline.pkl' is in the project root."
             )
-        with open(MODEL_PATH, "rb") as f:
-            _model = pickle.load(f)
-        logger.info("Loaded XGBoost model from %s", MODEL_PATH)
-    return _model
+        _pipeline = joblib.load(MODEL_PATH)
+        logger.info("Loaded XGBoost pipeline from %s", MODEL_PATH)
+    return _pipeline
 
 
 # ═══════════════════════════════════════════════════════════════════
 # Tool 1: ML Anomaly Prediction
 # ═══════════════════════════════════════════════════════════════════
 
+# Default values for numeric features not commonly available in alerts
+_NUMERIC_DEFAULTS = {f: 0 for f in NUMERIC_FEATURES}
+
+
 @tool
 def predict_anomaly(alert_json: str) -> str:
-    """Run the XGBoost intrusion detection model on network flow features
+    """Run the XGBoost intrusion detection pipeline on network flow features
     to predict whether the traffic is normal or an attack.
 
+    The pipeline includes built-in preprocessing (encoding + scaling).
+    You only need to provide the raw feature values.
+
     Args:
-        alert_json: A JSON string containing the network flow features.
-            Required keys (15 features):
-            - duration (float): Connection duration in seconds
+        alert_json: A JSON string containing network flow features.
+            Key features to include (at minimum):
             - protocol_type (str): e.g. "tcp", "udp", "icmp"
             - service (str): Network service, e.g. "http", "ftp", "smtp", "private"
             - flag (str): Connection status flag, e.g. "SF", "S0", "REJ"
+            - duration (float): Connection duration in seconds
             - src_bytes (int): Bytes sent from source to destination
             - dst_bytes (int): Bytes sent from destination to source
-            - wrong_fragment (int): Number of wrong fragments
-            - hot (int): Number of "hot" indicators
-            - logged_in (int): 1 if successfully logged in, 0 otherwise
-            - num_compromised (int): Number of compromised conditions
             - count (int): Connections to same host in past 2 seconds
             - srv_count (int): Connections to same service in past 2 seconds
             - serror_rate (float): SYN error rate (0.0 to 1.0)
             - srv_serror_rate (float): Service SYN error rate (0.0 to 1.0)
             - rerror_rate (float): REJ error rate (0.0 to 1.0)
+            - logged_in (int): 1 if successfully logged in, 0 otherwise
+            - hot (int): Number of "hot" indicators
+            - wrong_fragment (int): Number of wrong fragments
+            - num_compromised (int): Number of compromised conditions
+            Additional features (default to 0 if not provided):
+            - land, urgent, num_failed_logins, root_shell, su_attempted,
+              num_root, num_file_creations, num_shells, num_access_files,
+              num_outbound_cmds, is_host_login, is_guest_login,
+              srv_rerror_rate, same_srv_rate, diff_srv_rate,
+              srv_diff_host_rate, dst_host_count, dst_host_srv_count,
+              dst_host_same_srv_rate, dst_host_diff_srv_rate,
+              dst_host_same_src_port_rate, dst_host_srv_diff_host_rate,
+              dst_host_serror_rate, dst_host_srv_serror_rate,
+              dst_host_rerror_rate, dst_host_srv_rerror_rate
 
     Returns:
         A structured analysis string containing the prediction (normal/attack),
@@ -86,50 +100,63 @@ def predict_anomaly(alert_json: str) -> str:
     except json.JSONDecodeError as e:
         return f"ERROR: Invalid JSON input — {e}"
 
-    # Validate required features
-    missing = [f for f in SELECTED_FEATURES if f not in alert]
-    if missing:
+    # Validate that categorical features are present (required)
+    missing_cat = [f for f in CATEGORICAL_FEATURES if f not in alert]
+    if missing_cat:
         return (
-            f"ERROR: Missing required features: {missing}. "
-            f"All 15 features are required: {SELECTED_FEATURES}"
+            f"ERROR: Missing required categorical features: {missing_cat}. "
+            f"These must be provided: {CATEGORICAL_FEATURES}"
         )
 
     try:
-        preprocessor = _get_preprocessor()
-        model = _get_model()
+        pipeline = _get_pipeline()
 
-        # Preprocess and predict
-        X = preprocessor.transform(alert)
-        prediction = model.predict(X)[0]
-        proba = model.predict_proba(X)[0]
+        # Build a single-row DataFrame with all 41 features
+        row = {}
+        for feat in CATEGORICAL_FEATURES:
+            row[feat] = str(alert[feat])
+        for feat in NUMERIC_FEATURES:
+            row[feat] = float(alert.get(feat, _NUMERIC_DEFAULTS[feat]))
 
-        label = "ATTACK" if prediction == 0 else "NORMAL"
+        df = pd.DataFrame([row], columns=PIPELINE_FEATURES)
+
+        # Predict using the full pipeline (encoding + scaling + XGBoost)
+        prediction = pipeline.predict(df)[0]
+        proba = pipeline.predict_proba(df)[0]
+
+        # Target mapping: 0 = normal, 1 = attack
+        label = "ATTACK" if prediction == 1 else "NORMAL"
         confidence = float(max(proba)) * 100
 
-        # Get feature importances for explainability
-        importances = model.feature_importances_
-        feature_importance_pairs = list(zip(SELECTED_FEATURES, importances))
+        # Get feature importances from the XGBoost step inside the pipeline
+        xgb_model = pipeline.named_steps["classifier"]
+        importances = xgb_model.feature_importances_
+
+        # Map importances back to feature names
+        # After ColumnTransformer, feature order is: categoricals then numerics
+        all_feature_names = CATEGORICAL_FEATURES + NUMERIC_FEATURES
+        feature_importance_pairs = list(zip(all_feature_names, importances))
         feature_importance_pairs.sort(key=lambda x: x[1], reverse=True)
         top_features = feature_importance_pairs[:5]
 
         # Build structured response
         lines = [
-            f"=== ML PREDICTION RESULT ===",
+            "=== ML PREDICTION RESULT ===",
             f"Prediction  : {label}",
             f"Confidence  : {confidence:.1f}%",
-            f"Attack Prob : {proba[0]*100:.1f}%",
-            f"Normal Prob : {proba[1]*100:.1f}%",
-            f"",
-            f"Top 5 Contributing Features:",
+            f"Attack Prob : {proba[1]*100:.1f}%",
+            f"Normal Prob : {proba[0]*100:.1f}%",
+            "",
+            "Top 5 Contributing Features:",
         ]
         for feat_name, importance in top_features:
-            raw_value = alert.get(feat_name, "N/A")
+            raw_value = alert.get(feat_name, 0)
             lines.append(f"  • {feat_name} = {raw_value} (importance: {importance:.4f})")
 
         # Add key alert metadata for context
         lines.extend([
-            f"",
-            f"Key Alert Values:",
+            "",
+            "Key Alert Values:",
             f"  • Protocol: {alert.get('protocol_type', 'N/A')}",
             f"  • Service: {alert.get('service', 'N/A')}",
             f"  • Flag: {alert.get('flag', 'N/A')}",
@@ -266,9 +293,9 @@ def search_nuclei_kb(query: str, search_type: str = "keyword") -> str:
 
         # Format results
         lines = [
-            f"=== NUCLEI KB SEARCH RESULTS ===",
+            "=== NUCLEI KB SEARCH RESULTS ===",
             f"Query: '{query}' | Type: {search_type} | Found: {len(rows)} result(s)",
-            f"",
+            "",
         ]
 
         for i, row in enumerate(rows, 1):
@@ -327,24 +354,24 @@ def get_nuclei_stats() -> str:
         stats = get_stats(db_path)
 
         lines = [
-            f"=== NUCLEI KB STATISTICS ===",
+            "=== NUCLEI KB STATISTICS ===",
             f"Total Templates : {stats['total']:,}",
             f"New This Week   : {stats['new_this_week']}",
-            f"",
-            f"By Severity:",
+            "",
+            "By Severity:",
         ]
         for sev in ["critical", "high", "medium", "low", "info", "unknown"]:
             count = stats["by_severity"].get(sev, 0)
             if count:
                 lines.append(f"  • {sev:10s} : {count:,}")
 
-        lines.append(f"\nBy Protocol:")
+        lines.append("\nBy Protocol:")
         for proto, count in sorted(
             stats["by_protocol"].items(), key=lambda x: -x[1]
         )[:10]:
             lines.append(f"  • {proto:12s} : {count:,}")
 
-        lines.append(f"\nTop 15 Tags:")
+        lines.append("\nTop 15 Tags:")
         for tag, count in stats["top_tags"][:15]:
             lines.append(f"  • {tag:20s} : {count:,}")
 

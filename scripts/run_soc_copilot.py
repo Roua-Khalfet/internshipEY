@@ -10,8 +10,8 @@ Usage:
     python scripts/run_soc_copilot.py --scenario 2 -q    # Quiet mode (no verbose)
 
 Prerequisites:
-    1. Set your API key:  $env:GEMINI_API_KEY="your_key"
-    2. Run preprocessors:  python scripts/save_preprocessors.py
+    1. Set your API key in .env (GROQ_API_KEY or GEMINI_API_KEY)
+    2. Ensure nsl_kdd_xgboost_pipeline.pkl is in the project root
     3. Ensure nuclei_kb.db exists:  python scripts/run_pipeline.py
 """
 
@@ -24,6 +24,12 @@ from pathlib import Path
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 # Load environment variables from .env (if present)
 try:
@@ -46,21 +52,47 @@ SCENARIOS = {
             "High connection count with 100% SYN error rate — classic SYN flood."
         ),
         "alert": {
-            "duration": 0,
             "protocol_type": "tcp",
             "service": "http",
-            "flag": "S0",         # SYN only, no response (half-open)
+            "flag": "S0",
+            "duration": 0,
             "src_bytes": 0,
             "dst_bytes": 0,
+            "land": 0,
             "wrong_fragment": 0,
+            "urgent": 0,
             "hot": 0,
+            "num_failed_logins": 0,
             "logged_in": 0,
             "num_compromised": 0,
-            "count": 511,         # Very high: 511 connections in 2 seconds
+            "root_shell": 0,
+            "su_attempted": 0,
+            "num_root": 0,
+            "num_file_creations": 0,
+            "num_shells": 0,
+            "num_access_files": 0,
+            "num_outbound_cmds": 0,
+            "is_host_login": 0,
+            "is_guest_login": 0,
+            "count": 511,
             "srv_count": 511,
-            "serror_rate": 1.0,   # 100% SYN errors
+            "serror_rate": 1.0,
             "srv_serror_rate": 1.0,
             "rerror_rate": 0.0,
+            "srv_rerror_rate": 0.0,
+            "same_srv_rate": 1.0,
+            "diff_srv_rate": 0.0,
+            "srv_diff_host_rate": 0.0,
+            "dst_host_count": 255,
+            "dst_host_srv_count": 255,
+            "dst_host_same_srv_rate": 1.0,
+            "dst_host_diff_srv_rate": 0.0,
+            "dst_host_same_src_port_rate": 1.0,
+            "dst_host_srv_diff_host_rate": 0.0,
+            "dst_host_serror_rate": 1.0,
+            "dst_host_srv_serror_rate": 1.0,
+            "dst_host_rerror_rate": 0.0,
+            "dst_host_srv_rerror_rate": 0.0,
         },
     },
     2: {
@@ -70,21 +102,47 @@ SCENARIOS = {
             "High source bytes suggest possible data exfiltration."
         ),
         "alert": {
-            "duration": 1024,
             "protocol_type": "tcp",
             "service": "ftp_data",
-            "flag": "SF",           # Normal connection termination
-            "src_bytes": 58724,     # Very high: ~57KB outbound
+            "flag": "SF",
+            "duration": 1024,
+            "src_bytes": 58724,
             "dst_bytes": 8112,
+            "land": 0,
             "wrong_fragment": 0,
+            "urgent": 0,
             "hot": 0,
-            "logged_in": 1,         # Successfully authenticated
-            "num_compromised": 2,   # Compromise indicators
+            "num_failed_logins": 0,
+            "logged_in": 1,
+            "num_compromised": 2,
+            "root_shell": 0,
+            "su_attempted": 0,
+            "num_root": 0,
+            "num_file_creations": 0,
+            "num_shells": 0,
+            "num_access_files": 0,
+            "num_outbound_cmds": 0,
+            "is_host_login": 0,
+            "is_guest_login": 0,
             "count": 3,
             "srv_count": 3,
             "serror_rate": 0.0,
             "srv_serror_rate": 0.0,
             "rerror_rate": 0.0,
+            "srv_rerror_rate": 0.0,
+            "same_srv_rate": 1.0,
+            "diff_srv_rate": 0.0,
+            "srv_diff_host_rate": 0.0,
+            "dst_host_count": 10,
+            "dst_host_srv_count": 10,
+            "dst_host_same_srv_rate": 1.0,
+            "dst_host_diff_srv_rate": 0.0,
+            "dst_host_same_src_port_rate": 0.5,
+            "dst_host_srv_diff_host_rate": 0.0,
+            "dst_host_serror_rate": 0.0,
+            "dst_host_srv_serror_rate": 0.0,
+            "dst_host_rerror_rate": 0.0,
+            "dst_host_srv_rerror_rate": 0.0,
         },
     },
     3: {
@@ -94,21 +152,47 @@ SCENARIOS = {
             "DNS requests should be small — large payloads suggest tunneling."
         ),
         "alert": {
-            "duration": 0,
             "protocol_type": "udp",
-            "service": "domain_u",  # DNS over UDP
+            "service": "domain_u",
             "flag": "SF",
-            "src_bytes": 512,       # Large for DNS (normal is ~40-100 bytes)
-            "dst_bytes": 1024,      # Very large DNS response
+            "duration": 0,
+            "src_bytes": 512,
+            "dst_bytes": 1024,
+            "land": 0,
             "wrong_fragment": 0,
+            "urgent": 0,
             "hot": 0,
+            "num_failed_logins": 0,
             "logged_in": 0,
             "num_compromised": 0,
-            "count": 150,           # High frequency of DNS queries
+            "root_shell": 0,
+            "su_attempted": 0,
+            "num_root": 0,
+            "num_file_creations": 0,
+            "num_shells": 0,
+            "num_access_files": 0,
+            "num_outbound_cmds": 0,
+            "is_host_login": 0,
+            "is_guest_login": 0,
+            "count": 150,
             "srv_count": 150,
             "serror_rate": 0.0,
             "srv_serror_rate": 0.0,
             "rerror_rate": 0.0,
+            "srv_rerror_rate": 0.0,
+            "same_srv_rate": 1.0,
+            "diff_srv_rate": 0.0,
+            "srv_diff_host_rate": 0.0,
+            "dst_host_count": 50,
+            "dst_host_srv_count": 50,
+            "dst_host_same_srv_rate": 1.0,
+            "dst_host_diff_srv_rate": 0.0,
+            "dst_host_same_src_port_rate": 0.0,
+            "dst_host_srv_diff_host_rate": 0.0,
+            "dst_host_serror_rate": 0.0,
+            "dst_host_srv_serror_rate": 0.0,
+            "dst_host_rerror_rate": 0.0,
+            "dst_host_srv_rerror_rate": 0.0,
         },
     },
 }
@@ -179,7 +263,7 @@ def main():
 
     print("╔══════════════════════════════════════════════════════════════╗")
     print("║          🤖 SOC COPILOT — AI Security Agent                ║")
-    print("║          Powered by LangChain + Gemini + XGBoost           ║")
+    print("║          Powered by LangChain + Groq + XGBoost Pipeline    ║")
     print("╚══════════════════════════════════════════════════════════════╝")
 
     if args.scenario:

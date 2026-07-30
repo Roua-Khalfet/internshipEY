@@ -1,0 +1,87 @@
+{
+  "model_type": "XGBClassifier inside a scikit-learn Pipeline",
+  "python_version": "3.12.13",
+  "package_versions": {
+    "numpy": "2.5.1",
+    "pandas": "3.0.3",
+    "scipy": "1.18.0",
+    "scikit-learn": "1.9.0",
+    "xgboost": "3.3.0",
+    "matplotlib": "3.11.1",
+    "joblib": "1.5.3"
+  },
+  "target_mapping": {
+    "normal": 0,
+    "attack": 1
+  },
+  "categorical_features": [
+    "protocol_type",
+    "service",
+    "flag"
+  ],
+  "numeric_features": [
+    "duration",
+    "src_bytes",
+    "dst_bytes",
+    "land",
+    "wrong_fragment",
+    "urgent",
+    "hot",
+    "num_failed_logins",
+    "logged_in",
+    "num_compromised",
+    "root_shell",
+    "su_attempted",
+    "num_root",
+    "num_file_creations",
+    "num_shells",
+    "num_access_files",
+    "num_outbound_cmds",
+    "is_host_login",
+    "is_guest_login",
+    "count",
+    "srv_count",
+    "serror_rate",
+    "srv_serror_rate",
+    "rerror_rate",
+    "srv_rerror_rate",
+    "same_srv_rate",
+    "diff_srv_rate",
+    "srv_diff_host_rate",
+    "dst_host_count",
+    "dst_host_srv_count",
+    "dst_host_same_srv_rate",
+    "dst_host_diff_srv_rate",
+    "dst_host_same_src_port_rate",
+    "dst_host_srv_diff_host_rate",
+    "dst_host_serror_rate",
+    "dst_host_srv_serror_rate",
+    "dst_host_rerror_rate",
+    "dst_host_srv_rerror_rate"
+  ],
+  "official_test_used": false,
+  "best_cv_f1": 0.9891349860469583,
+  "best_parameters": {
+    "classifier__subsample": 0.8,
+    "classifier__reg_lambda": 1.0,
+    "classifier__n_estimators": 400,
+    "classifier__min_child_weight": 1,
+    "classifier__max_depth": 8,
+    "classifier__learning_rate": 0.01,
+    "classifier__colsample_bytree": 0.6
+  },
+  "validation_metrics": {
+    "accuracy": 0.9944903581267218,
+    "precision": 0.9885057471264368,
+    "recall": 1.0,
+    "f1": 0.9942196531791907,
+    "roc_auc": 0.999939120905881
+  },
+  "test_metrics": {
+    "accuracy": 0.9889867841409692,
+    "precision": 0.9906976744186047,
+    "recall": 0.9861111111111112,
+    "f1": 0.988399071925754,
+    "roc_auc": 0.9996887643946468
+  }
+}
