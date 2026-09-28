@@ -3,6 +3,12 @@ import sys
 import json
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from soc_agent.tools import predict_anomaly, search_nuclei_kb, get_nuclei_stats

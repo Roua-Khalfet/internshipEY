@@ -11,6 +11,12 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nuclei_kb.queries import get_stats, get_new_templates_since, get_changes_this_week

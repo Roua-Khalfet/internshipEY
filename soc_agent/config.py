@@ -25,13 +25,28 @@ except ImportError:
     pass
 
 # ── LLM Configuration ─────────────────────────────────────────────
+NVIDIA_API_KEY_ENV = "NVIDIA_API_KEY"
+NVIDIA_BASE_URL_DEFAULT = "https://integrate.api.nvidia.com/v1"
 GROQ_API_KEY_ENV = "GROQ_API_KEY"
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq" if os.environ.get("GROQ_API_KEY") else "gemini")
+LLM_PROVIDER = os.environ.get(
+    "LLM_PROVIDER",
+    "nvidia"
+    if os.environ.get("NVIDIA_API_KEY")
+    else ("groq" if os.environ.get("GROQ_API_KEY") else "gemini"),
+)
+
+def _get_default_model(provider: str) -> str:
+    if provider == "nvidia":
+        return "google/diffusiongemma-26b-a4b-it"
+    elif provider == "groq":
+        return "llama-3.3-70b-versatile"
+    return "gemini-3.8-flash"
+
 LLM_MODEL_NAME = os.environ.get(
     "SOC_LLM_MODEL",
-    "llama-3.3-70b-versatile" if LLM_PROVIDER == "groq" else "gemini-2.0-flash",
+    _get_default_model(LLM_PROVIDER),
 )
 
 # ── NSL-KDD Feature Configuration ─────────────────────────────────

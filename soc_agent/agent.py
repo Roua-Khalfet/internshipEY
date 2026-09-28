@@ -21,6 +21,8 @@ from soc_agent.config import (
     GROQ_API_KEY_ENV,
     LLM_MODEL_NAME,
     LLM_PROVIDER,
+    NVIDIA_API_KEY_ENV,
+    NVIDIA_BASE_URL_DEFAULT,
 )
 from soc_agent.prompts import SYSTEM_PROMPT
 from soc_agent.tools import get_nuclei_stats, predict_anomaly, search_nuclei_kb
@@ -50,10 +52,46 @@ def create_soc_agent(
     resolved_provider = (
         provider
         or LLM_PROVIDER
-        or ("groq" if os.environ.get("GROQ_API_KEY") or (api_key and api_key.startswith("gsk_")) else "gemini")
+        or (
+            "nvidia"
+            if os.environ.get("NVIDIA_API_KEY") or (api_key and api_key.startswith("nvapi-"))
+            else ("groq" if os.environ.get("GROQ_API_KEY") or (api_key and api_key.startswith("gsk_")) else "gemini")
+        )
     ).lower()
 
-    if resolved_provider == "groq":
+    if resolved_provider == "nvidia":
+        resolved_key = (
+            api_key
+            or os.environ.get(NVIDIA_API_KEY_ENV)
+            or os.environ.get("NVIDIA_API_KEY")
+        )
+        if not resolved_key:
+            raise ValueError(
+                f"No NVIDIA API key found. Set the {NVIDIA_API_KEY_ENV} environment variable in .env "
+                f"or pass api_key= to create_soc_agent()."
+            )
+        resolved_model = model_name or os.environ.get("SOC_LLM_MODEL", "google/diffusiongemma-26b-a4b-it")
+        base_url = os.environ.get("NVIDIA_BASE_URL", NVIDIA_BASE_URL_DEFAULT)
+
+        try:
+            from langchain_openai import ChatOpenAI
+            from langgraph.prebuilt import create_react_agent
+        except ImportError as e:
+            raise ImportError(
+                f"Missing required package: {e.name}. "
+                "Install with: pip install langchain-openai langgraph"
+            ) from e
+
+        llm = ChatOpenAI(
+            model=resolved_model,
+            api_key=resolved_key,
+            base_url=base_url,
+            temperature=0.1,
+            max_tokens=4096,
+            timeout=45,
+            max_retries=2,
+        )
+    elif resolved_provider == "groq":
         resolved_key = api_key or os.environ.get(GROQ_API_KEY_ENV) or os.environ.get("GROQ_API_KEY")
         if not resolved_key:
             raise ValueError(
@@ -85,7 +123,7 @@ def create_soc_agent(
                 f"or pass api_key= to create_soc_agent().\n"
                 f"  PowerShell: $env:{GEMINI_API_KEY_ENV}=\"your_api_key_here\"\n"
             )
-        resolved_model = model_name or os.environ.get("SOC_LLM_MODEL", "gemini-2.0-flash")
+        resolved_model = model_name or os.environ.get("SOC_LLM_MODEL", "gemini-3.8-flash")
 
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
